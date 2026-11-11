@@ -1,72 +1,94 @@
 #!/usr/bin/env python3
-"""
-three_cameras_launch.py
-- camera_front: 848x480x15 + IMU(Gyro/Accel) ON + Sync ON (터미널 명령어와 동일 설정)
-- camera_left/right: 424x240x6
-"""
-
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, TimerAction, ExecuteProcess
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.substitutions import FindPackageShare
 from launch.substitutions import PathJoinSubstitution
+from launch_ros.actions import Node  # Node 클래스 추가
 
 def generate_launch_description():
     realsense_launch = PathJoinSubstitution(
         [FindPackageShare('realsense2_camera'), 'launch', 'rs_launch.py']
     )
 
-    # 공통 기본 설정 (모든 카메라에 적용)
-    common_args_base = {
-        'camera_namespace': '',
+    def format_serial(sn):
+        sn = str(sn).strip()
+        return f"_{sn}" if not sn.startswith('_') else sn
+
+    # [좌/우측 카메라용 공통 설정]
+    common_args = {
+        'enable_depth': 'false',
+        'enable_gyro': 'false',
+        'enable_accel': 'false',
+        'unite_imu_method': '0',
+        'enable_infra1': 'false',
+        'enable_infra2': 'false',
+        'enable_metadata': 'false',
+        'publish_tf': 'false',
+        'initial_reset': 'true',
+        'rgb_camera.power_line_frequency': '2',
     }
 
-    def cam(name, serial, res='424x240x6', imu=False, sync=True):
-        """
-        카메라 설정을 생성하는 함수
-        imu=True일 경우 gyro, accel, unite_imu 설정 활성화
-        sync=True일 경우 enable_sync 활성화
-        """
-        args = {
-            'camera_name': name,
-            'serial_no': serial,
-            'rgb_camera.color_profile': res,
-            'enable_color': 'true',
-            'enable_depth': 'false',           # 뎁스 비활성화
-            'align_depth.enable': 'false',    # 뎁스 정렬 비활성화
-            'enable_sync': 'true' if sync else 'false',
-            'enable_gyro': 'true' if imu else 'false',
-            'enable_accel': 'true' if imu else 'false',
-            'unite_imu_method': '2' if imu else '0',  # 2: Linear Interpolation
-        }
-        args.update(common_args_base)
-        
-        return IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(realsense_launch),
-            launch_arguments=args.items(),
-        )
-
-    # 이전 노드 프로세스 정리 (안정적인 재실행을 위함)
-    kill_old = ExecuteProcess(
-        cmd=['bash', '-c', 'killall -9 realsense2_camera_node 2>/dev/null || true'],
-        output='screen',
+    # 1. 정면 카메라 (요청하신 Node 방식으로 변경)
+    # 시리얼 번호는 기존 번호('234322302402')를 그대로 사용합니다.
+    front = Node(
+        package="realsense2_camera",
+        executable="realsense2_camera_node",
+        namespace="camera",
+        name="camera",
+        output="screen",
+        parameters=[{
+            "serial_no": "336222300167",  # 정면 카메라 식별을 위해 필요
+            "enable_color": True,
+            "enable_depth": True,
+            "enable_infra1": False,
+            "enable_infra2": False,
+            "enable_gyro": False,
+            "enable_accel": False,
+            "align_depth.enable": True,
+            "enable_sync": True,
+            "initial_reset": True,
+            "rgb_camera.color_profile": "848x480x15",
+            "depth_module.depth_profile": "848x480x15",
+        }]
     )
 
-    # 카메라 정의
-    # 1. 왼쪽 (기본 해상도, 동기화 사용)
-    left = cam('camera_left', '_233722072176')
-    
-    # 2. 오른쪽 (기본 해상도, 동기화 사용)
-    right = cam('camera_right', '_405622076406')
-    
-    # 3. 정면 (요청하신 CLI 명령어와 100% 동일한 설정)
-    # 848x480x15, IMU ON, Sync ON, Depth OFF, Align Depth OFF
-    front = cam('camera_front', '_234322302402', res='848x480x15', imu=True, sync=True)
+    # 2. 왼쪽 카메라 (기존 방식 유지)
+    left = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(realsense_launch),
+        launch_arguments={
+            'camera_name': 'camera_left', # 기존 코드의 이름 유지
+            'camera_namespace': '',
+            'serial_no': format_serial('233722072176'),
+            'rgb_camera.color_profile': '424x240x6',
+            'enable_color': 'true',
+            **common_args
+        }.items()
+    )
+
+    # 3. 오른쪽 카메라 (기존 방식 유지)
+    right = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(realsense_launch),
+        launch_arguments={
+            'camera_name': 'camera_right', # 기존 코드의 이름 유지
+            'camera_namespace': '',
+            'serial_no': format_serial('405622076406'),
+            'rgb_camera.color_profile': '424x240x6',
+            'enable_color': 'true',
+            **common_args
+        }.items()
+    )
+
+    # 좀비 프로세스 정리
+    kill_old = ExecuteProcess(
+        cmd=['bash', '-c', 'pkill -9 -f realsense2_camera_node || true'],
+        output='screen'
+    )
 
     return LaunchDescription([
         kill_old,
-        # 카메라 간 충돌 방지를 위해 순차적 실행 (간격 유지)
-        TimerAction(period=1.0, actions=[left]),
-        TimerAction(period=6.0, actions=[right]),
-        TimerAction(period=11.0, actions=[front]),
+        # 정면부터 순서대로 기동
+        TimerAction(period=2.0, actions=[front]),
+        TimerAction(period=7.0, actions=[left]),
+        TimerAction(period=12.0, actions=[right]),
     ])

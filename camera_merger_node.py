@@ -11,7 +11,7 @@ class CameraMergerNode(Node):
 
         # 파라미터 설정
         self.declare_parameter('left_topic', '/camera_left/color/image_raw')
-        self.declare_parameter('front_topic', '/camera_front/color/image_raw')
+        self.declare_parameter('front_topic', '/camera/camera/color/image_raw')
         self.declare_parameter('right_topic', '/camera_right/color/image_raw')
         self.declare_parameter('output_topic', '/camera_merged/image_raw')
         self.declare_parameter('target_height', 240) # 합칠 이미지의 세로 높이 (240으로 고정 시 480인 front는 축소됨)
